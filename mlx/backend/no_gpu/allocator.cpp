@@ -1,6 +1,7 @@
 // Copyright © 2023-2026 Apple Inc.
 
 #include <algorithm>
+#include <limits>
 #include <mutex>
 
 #include "mlx/allocator.h"
@@ -99,6 +100,12 @@ Buffer CommonAllocator::malloc(size_t size) {
   lk.unlock();
 
   // Cache miss: allocate from OS
+  // `size + sizeof(size_t)` below must not overflow, or a tiny real
+  // allocation would be made while the stored header still claims `size`,
+  // leading to an out-of-bounds write when the header is stamped below.
+  if (size > std::numeric_limits<size_t>::max() - sizeof(size_t)) {
+    throw std::bad_alloc();
+  }
   void* ptr = std::malloc(size + sizeof(size_t));
   if (ptr != nullptr) {
     *static_cast<size_t*>(ptr) = size;

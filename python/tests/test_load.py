@@ -119,6 +119,34 @@ class TestLoad(mlx_tests.MLXTestCase):
                 with self.assertRaises(RuntimeError):
                     mx.load(save_file, stream=mx.cpu)
 
+    def test_load_npy_allocator_header_overflow(self):
+        # A positive shape whose element count is itemsize=1 away from
+        # SIZE_MAX passes the shape-validation guard in mlx/io/load.cpp
+        # (which only rejects products that would overflow size_t), but
+        # used to overflow `size + sizeof(size_t)` in
+        # CommonAllocator::malloc (mlx/backend/no_gpu/allocator.cpp),
+        # wrapping to a tiny real allocation while the stored header still
+        # claimed the full size. Loading must now fail cleanly instead of
+        # corrupting heap memory.
+        def write_npy(path, shape):
+            header = "{'descr': '<u1', 'fortran_order': False, 'shape': %s, }" % (
+                shape,
+            )
+            header += " " * ((16 - (11 + len(header)) % 16) % 16) + "\n"
+            with open(path, "wb") as f:
+                f.write(b"\x93NUMPY\x01\x00")
+                f.write(struct.pack("<H", len(header)))
+                f.write(header.encode())
+                f.write(b"\x00" * 64)
+
+        # product(shape) == 2**64 - 2 == SIZE_MAX - 1, each dim < 2**31 - 1.
+        shape = (649657, 31252369, 908558)
+        save_file = os.path.join(self.test_dir, "alloc_header_overflow.npy")
+        write_npy(save_file, shape)
+        out = mx.load(save_file, stream=mx.cpu)
+        with self.assertRaises(Exception):
+            mx.eval(out)
+
     def test_async_load_npy_read_error_across_streams(self):
         save_file = os.path.join(self.test_dir, "truncated_async.npy")
         expected = np.arange(16, dtype=np.float32)
