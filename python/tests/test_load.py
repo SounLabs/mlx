@@ -128,8 +128,9 @@ class TestLoad(mlx_tests.MLXTestCase):
         # wrapping to a tiny real allocation while the stored header still
         # claimed the full size. Loading must now fail cleanly instead of
         # corrupting heap memory.
-        def write_npy(path, shape):
-            header = "{'descr': '<u1', 'fortran_order': False, 'shape': %s, }" % (
+        def write_npy(path, shape, descr="<u1"):
+            header = "{'descr': '%s', 'fortran_order': False, 'shape': %s, }" % (
+                descr,
                 shape,
             )
             header += " " * ((16 - (11 + len(header)) % 16) % 16) + "\n"
@@ -144,6 +145,20 @@ class TestLoad(mlx_tests.MLXTestCase):
         save_file = os.path.join(self.test_dir, "alloc_header_overflow.npy")
         write_npy(save_file, shape)
         out = mx.load(save_file, stream=mx.cpu)
+        with self.assertRaises(Exception):
+            mx.eval(out)
+
+        # A second, much larger shape whose byte count is nowhere near
+        # SIZE_MAX (no overflow in `size + sizeof(size_t)`), so std::malloc
+        # genuinely fails. CommonAllocator::malloc used to swallow that
+        # failure (returning a Buffer wrapping a null pointer without
+        # throwing) instead of raising, letting the null pointer reach the
+        # async file-reading path. Must now fail cleanly and quickly rather
+        # than let the read path try to service the request.
+        huge_shape = (2147483647, 1073741824)  # f8: ~18.4 exabytes
+        huge_file = os.path.join(self.test_dir, "alloc_null_check.npy")
+        write_npy(huge_file, huge_shape, descr="<f8")
+        out = mx.load(huge_file, stream=mx.cpu)
         with self.assertRaises(Exception):
             mx.eval(out)
 

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <mutex>
+#include <new>
 
 #include "mlx/allocator.h"
 #include "mlx/backend/common/buffer_cache.h"
@@ -107,9 +108,10 @@ Buffer CommonAllocator::malloc(size_t size) {
     throw std::bad_alloc();
   }
   void* ptr = std::malloc(size + sizeof(size_t));
-  if (ptr != nullptr) {
-    *static_cast<size_t*>(ptr) = size;
+  if (ptr == nullptr) {
+    throw std::bad_alloc();
   }
+  *static_cast<size_t*>(ptr) = size;
   lk.lock();
   active_memory_ += size;
   peak_memory_ = std::max(active_memory_, peak_memory_);
